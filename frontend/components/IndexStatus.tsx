@@ -8,9 +8,23 @@ interface Status {
   error?: string
 }
 
+interface FolderItem { name: string; path: string }
+interface AlbumItem  { name: string; key: string; image_count: number }
+interface BrowseResult { path: string; folders: FolderItem[]; albums: AlbumItem[] }
+
+type Selection =
+  | { type: 'all' }
+  | { type: 'folder'; path: string; label: string }
+  | { type: 'albums'; keys: string[]; label: string }
+
 export default function IndexStatus() {
-  const [status, setStatus] = useState<Status | null>(null)
+  const [status, setStatus]       = useState<Status | null>(null)
   const [clustering, setClustering] = useState(false)
+  const [picking, setPicking]     = useState(false)
+  const [browse, setBrowse]       = useState<BrowseResult | null>(null)
+  const [browseStack, setBrowseStack] = useState<string[]>([])  // path history
+  const [selection, setSelection] = useState<Selection>({ type: 'all' })
+  const [selectedAlbums, setSelectedAlbums] = useState<Set<string>>(new Set())
 
   const poll = () => {
     fetch('/api/index/status').then(r => r.json()).then(setStatus)
@@ -22,8 +36,62 @@ export default function IndexStatus() {
     return () => clearInterval(t)
   }, [])
 
+  const openPicker = async () => {
+    setPicking(true)
+    setBrowseStack([])
+    setSelectedAlbums(new Set())
+    await loadBrowse('')
+  }
+
+  const loadBrowse = async (path: string) => {
+    const r = await fetch(`/api/browse/folders?path=${encodeURIComponent(path)}`)
+    const data: BrowseResult = await r.json()
+    setBrowse(data)
+  }
+
+  const enterFolder = async (path: string) => {
+    setBrowseStack(s => [...s, browse?.path ?? ''])
+    await loadBrowse(path)
+  }
+
+  const goBack = async () => {
+    const prev = browseStack[browseStack.length - 1] ?? ''
+    setBrowseStack(s => s.slice(0, -1))
+    await loadBrowse(prev)
+  }
+
+  const toggleAlbum = (key: string) => {
+    setSelectedAlbums(s => {
+      const next = new Set(s)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  const confirmSelection = () => {
+    if (selectedAlbums.size > 0) {
+      const names = browse?.albums
+        .filter(a => selectedAlbums.has(a.key))
+        .map(a => a.name).join(', ') ?? ''
+      setSelection({ type: 'albums', keys: [...selectedAlbums], label: names })
+    } else if (browse && browse.path) {
+      setSelection({ type: 'folder', path: browse.path, label: browse.path })
+    } else {
+      setSelection({ type: 'all' })
+    }
+    setPicking(false)
+  }
+
   const startIndex = async () => {
-    await fetch('/api/index/start', { method: 'POST' })
+    const body =
+      selection.type === 'folder'  ? { folder_path: selection.path } :
+      selection.type === 'albums'  ? { album_keys: selection.keys } :
+      {}
+    await fetch('/api/index/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
     poll()
   }
 
@@ -36,12 +104,28 @@ export default function IndexStatus() {
   if (!status) return null
 
   const pct = status.total > 0 ? Math.round((status.indexed / status.total) * 100) : 0
+  const scopeLabel =
+    selection.type === 'all'    ? 'Entire account' :
+    selection.type === 'folder' ? `Folder: ${selection.label}` :
+                                  `Albums: ${selection.label}`
 
   return (
     <div className="bg-gray-900 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-gray-300">Indexing</span>
         <span className="text-xs text-gray-500 capitalize">{status.status}</span>
+      </div>
+
+      {/* Scope selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-400 truncate flex-1">{scopeLabel}</span>
+        <button
+          onClick={openPicker}
+          disabled={status.status === 'running'}
+          className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 shrink-0"
+        >
+          Change scope
+        </button>
       </div>
 
       {status.total > 0 && (
@@ -74,6 +158,87 @@ export default function IndexStatus() {
           {clustering ? 'Clustering...' : 'Cluster Faces'}
         </button>
       </div>
+
+      {/* Folder/Album picker modal */}
+      {picking && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center gap-2 p-4 border-b border-gray-800">
+              {browseStack.length > 0 && (
+                <button onClick={goBack} className="text-gray-400 hover:text-white text-sm">←</button>
+              )}
+              <span className="text-sm font-medium flex-1 truncate">
+                {browse?.path ? `/${browse.path}` : 'Your SmugMug'}
+              </span>
+              <button onClick={() => setPicking(false)} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
+            </div>
+
+            {/* Content */}
+            <div className="overflow-y-auto flex-1 p-2">
+              {!browse ? (
+                <p className="text-gray-500 text-sm p-4">Loading...</p>
+              ) : (
+                <>
+                  {/* Folders */}
+                  {browse.folders.map(f => (
+                    <button
+                      key={f.path}
+                      onClick={() => enterFolder(f.path)}
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-gray-800 text-left"
+                    >
+                      <span className="text-gray-400">📁</span>
+                      <span className="text-sm flex-1">{f.name}</span>
+                      <span className="text-gray-600 text-xs">→</span>
+                    </button>
+                  ))}
+
+                  {/* Albums with checkboxes */}
+                  {browse.albums.map(a => (
+                    <label
+                      key={a.key}
+                      className="flex items-center gap-3 px-3 py-2 rounded hover:bg-gray-800 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedAlbums.has(a.key)}
+                        onChange={() => toggleAlbum(a.key)}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-sm flex-1">{a.name}</span>
+                      <span className="text-gray-500 text-xs">{a.image_count} photos</span>
+                    </label>
+                  ))}
+
+                  {browse.folders.length === 0 && browse.albums.length === 0 && (
+                    <p className="text-gray-500 text-sm p-4">Empty folder</p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-800 flex gap-2">
+              <button
+                onClick={() => { setSelection({ type: 'all' }); setPicking(false) }}
+                className="flex-1 text-sm text-gray-400 hover:text-white py-2"
+              >
+                Index entire account
+              </button>
+              <button
+                onClick={confirmSelection}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-sm py-2 rounded"
+              >
+                {selectedAlbums.size > 0
+                  ? `Index ${selectedAlbums.size} album${selectedAlbums.size > 1 ? 's' : ''}`
+                  : browse?.path
+                    ? `Index folder "${browse.path}"`
+                    : 'Index all'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

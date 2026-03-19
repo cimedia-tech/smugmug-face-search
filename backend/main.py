@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from db import init_db
 from services.face_engine import preload_models
 from routes.auth import router as auth_router
+from routes.browse import router as browse_router
 from routes.index import router as index_router
 from routes.people import router as people_router
 
@@ -25,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(browse_router)
 app.include_router(index_router)
 app.include_router(people_router)
 

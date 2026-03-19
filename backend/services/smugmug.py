@@ -48,6 +48,30 @@ class SmugMugClient:
         data = self._get("/api/v2!authuser")
         return data["User"]
 
+    def get_folders(self, user_nick: str, folder_path: str = "") -> list[dict]:
+        """List subfolders under a path. folder_path="" = root."""
+        path = f"/api/v2/folder/user/{user_nick}"
+        if folder_path:
+            path += f"/{folder_path.strip('/')}"
+        path += "!folders"
+        try:
+            data = self._get(path)
+            return data.get("Folder", [])
+        except Exception:
+            return []
+
+    def get_folder_albums(self, user_nick: str, folder_path: str) -> list[dict]:
+        """List albums directly inside a folder path."""
+        path = f"/api/v2/folder/user/{user_nick}"
+        if folder_path:
+            path += f"/{folder_path.strip('/')}"
+        path += "!albums"
+        try:
+            data = self._get(path)
+            return data.get("Album", [])
+        except Exception:
+            return []
+
     def get_albums(self, user_nick: str):
         albums = []
         start = 1
@@ -60,6 +84,18 @@ class SmugMugClient:
                 start += 100
             else:
                 break
+        return albums
+
+    def get_albums_in_folder(self, user_nick: str, folder_path: str) -> list[dict]:
+        """Recursively collect all albums under a folder path."""
+        albums = self.get_folder_albums(user_nick, folder_path)
+        for subfolder in self.get_folders(user_nick, folder_path):
+            sub_path = subfolder.get("UrlPath", "").lstrip("/").split("/user/")[-1]
+            # UrlPath is like /user/nick/2026 — extract the part after nick
+            parts = sub_path.split("/", 1)
+            rel = parts[1] if len(parts) > 1 else ""
+            if rel:
+                albums.extend(self.get_albums_in_folder(user_nick, rel))
         return albums
 
     def get_images(self, album_key: str):

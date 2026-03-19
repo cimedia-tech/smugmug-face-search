@@ -57,7 +57,20 @@ def _store_face(image_key: str, album_key: str, image_url: str,
               bbox["x"], bbox["y"], bbox["w"], bbox["h"],
               crop))
 
-async def run_indexing(job_id: int):
+def _resolve_albums(client: SmugMugClient, user: str,
+                    folder_path: str | None, album_keys: list[str] | None) -> list[dict]:
+    """Return list of album dicts based on the requested scope."""
+    if album_keys:
+        # Specific albums by key — wrap in minimal dicts
+        return [{"AlbumKey": k} for k in album_keys]
+    if folder_path:
+        return client.get_albums_in_folder(user, folder_path)
+    # No scope = full account
+    return client.get_albums(user)
+
+
+async def run_indexing(job_id: int, folder_path: str | None = None,
+                       album_keys: list[str] | None = None):
     token, secret, user = _get_tokens()
     if not token:
         _update_job(job_id, status="failed", error="No OAuth token stored")
@@ -65,8 +78,10 @@ async def run_indexing(job_id: int):
 
     client = SmugMugClient(API_KEY, API_SECRET, token, secret)
 
+    scope_label = folder_path or ("selected albums" if album_keys else "full account")
+
     try:
-        albums = client.get_albums(user)
+        albums = _resolve_albums(client, user, folder_path, album_keys)
         all_images = []
         for album in albums:
             imgs = client.get_images(album["AlbumKey"])
@@ -75,13 +90,21 @@ async def run_indexing(job_id: int):
 
         _update_job(job_id, status="running", total_images=len(all_images))
 
+        # Load already-indexed keys once to avoid per-image DB queries
+        with get_conn() as conn:
+            already_indexed = set(
+                r[0] for r in conn.execute(
+                    "SELECT smugmug_image_key FROM face_index"
+                ).fetchall()
+            )
+
         async with httpx.AsyncClient(timeout=30) as http:
             for i, (img, album_key) in enumerate(all_images):
                 image_key = img.get("ImageKey", "")
                 image_url = img.get("ArchivedUri") or img.get("ImageUrl", "")
                 thumb_url = img.get("ThumbnailUrl", "")
 
-                if _already_indexed(image_key):
+                if image_key in already_indexed:
                     _update_job(job_id, indexed_count=i+1, last_image_key=image_key)
                     continue
 
@@ -92,6 +115,7 @@ async def run_indexing(job_id: int):
                     for fi, face in enumerate(faces):
                         _store_face(image_key, album_key, image_url, thumb_url,
                                     fi, face["embedding"], face["bbox"], face["crop_bytes"])
+                    already_indexed.add(image_key)
                 except Exception as e:
                     print(f"Skip {image_key}: {e}")
 
@@ -101,7 +125,9 @@ async def run_indexing(job_id: int):
     except Exception as e:
         _update_job(job_id, status="failed", error=str(e))
 
-def start_indexing_job() -> int:
+
+def start_indexing_job(folder_path: str | None = None,
+                       album_keys: list[str] | None = None) -> int:
     job_id = _create_job()
-    asyncio.create_task(run_indexing(job_id))
+    asyncio.create_task(run_indexing(job_id, folder_path=folder_path, album_keys=album_keys))
     return job_id
