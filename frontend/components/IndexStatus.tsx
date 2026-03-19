@@ -1,5 +1,36 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+
+function playDoneSound(success: boolean) {
+  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+  const notes = success
+    ? [523, 659, 784, 1047]   // C E G C — pleasant ascending chord
+    : [400, 300]               // descending drop for failure
+
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.type = 'sine'
+    osc.frequency.value = freq
+    const t = ctx.currentTime + i * 0.18
+    gain.gain.setValueAtTime(0.4, t)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4)
+    osc.start(t)
+    osc.stop(t + 0.4)
+  })
+}
+
+function notifyDone(success: boolean) {
+  playDoneSound(success)
+  if (Notification.permission === 'granted') {
+    new Notification(
+      success ? '✅ Indexing complete' : '❌ Indexing failed',
+      { body: success ? 'Face indexing finished. You can now cluster.' : 'Check the error log.' }
+    )
+  }
+}
 
 interface Status {
   status: string
@@ -18,16 +49,29 @@ type Selection =
   | { type: 'albums'; keys: string[]; label: string }
 
 export default function IndexStatus() {
-  const [status, setStatus]       = useState<Status | null>(null)
+  const [status, setStatus]         = useState<Status | null>(null)
   const [clustering, setClustering] = useState(false)
-  const [picking, setPicking]     = useState(false)
-  const [browse, setBrowse]       = useState<BrowseResult | null>(null)
-  const [browseStack, setBrowseStack] = useState<string[]>([])  // path history
-  const [selection, setSelection] = useState<Selection>({ type: 'all' })
+  const [picking, setPicking]       = useState(false)
+  const [browse, setBrowse]         = useState<BrowseResult | null>(null)
+  const [browseStack, setBrowseStack] = useState<string[]>([])
+  const [selection, setSelection]   = useState<Selection>({ type: 'all' })
   const [selectedAlbums, setSelectedAlbums] = useState<Set<string>>(new Set())
+  const prevStatusRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [])
 
   const poll = () => {
-    fetch('/api/index/status').then(r => r.json()).then(setStatus)
+    fetch('/api/index/status').then(r => r.json()).then((s: Status) => {
+      const prev = prevStatusRef.current
+      if (prev === 'running' && s.status === 'done')   notifyDone(true)
+      if (prev === 'running' && s.status === 'failed') notifyDone(false)
+      prevStatusRef.current = s.status
+      setStatus(s)
+    })
   }
 
   useEffect(() => {
