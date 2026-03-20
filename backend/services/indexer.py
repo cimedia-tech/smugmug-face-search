@@ -1,16 +1,37 @@
 import asyncio
 import httpx
 import os
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from db import get_conn
 from services.smugmug import SmugMugClient
-from services.face_engine import extract_faces, embedding_to_blob
+from services.face_engine import extract_faces, embedding_to_blob, is_processable_url
 
-# How many images to download concurrently while processing
-DOWNLOAD_CONCURRENCY = int(os.environ.get("INDEX_CONCURRENCY", "4"))
+# Number of parallel download streams
+DOWNLOAD_CONCURRENCY = int(os.environ.get("INDEX_CONCURRENCY", "8"))
 
-# Stop flag — set to current job_id to request cancellation
+# Number of CPU worker processes for face detection (default: half of cores)
+CPU_WORKERS = int(os.environ.get("INDEX_CPU_WORKERS", max(1, os.cpu_count() // 2)))
+
+# Stop flag
 _stop_requested: int | None = None
+_executor: ProcessPoolExecutor | None = None
+
+
+def get_executor() -> ProcessPoolExecutor:
+    global _executor
+    if _executor is None:
+        _executor = ProcessPoolExecutor(
+            max_workers=CPU_WORKERS,
+            initializer=_worker_init,
+        )
+    return _executor
+
+
+def _worker_init():
+    """Called once per worker process — pre-loads the DeepFace model."""
+    from services.face_engine import preload_models
+    preload_models()
 
 
 def request_stop(job_id: int):
@@ -48,7 +69,6 @@ def get_active_job():
 
 
 def _sized_url(img: dict) -> str:
-    """Use a smaller sized URL instead of full-res ArchivedUri."""
     for size in ["X3LargeImageUrl", "X2LargeImageUrl", "LargeImageUrl", "ImageUrl"]:
         url = img.get(size)
         if url:
@@ -58,9 +78,7 @@ def _sized_url(img: dict) -> str:
 
 def _store_faces_batch(image_key: str, album_key: str, image_url: str,
                        thumb_url: str, faces: list):
-    """Insert all faces for one image in a single transaction."""
     if not faces:
-        # Still record that this image was processed (0 faces)
         with get_conn() as conn:
             conn.execute("""
                 INSERT OR IGNORE INTO face_index
@@ -87,8 +105,7 @@ def _store_faces_batch(image_key: str, album_key: str, image_url: str,
         """, rows)
 
 
-def _resolve_albums(client: SmugMugClient, user: str,
-                    folder_path: str | None, album_keys: list[str] | None) -> list[dict]:
+def _resolve_albums(client, user, folder_path, album_keys):
     if album_keys:
         return [{"AlbumKey": k} for k in album_keys]
     if folder_path:
@@ -96,8 +113,7 @@ def _resolve_albums(client: SmugMugClient, user: str,
     return client.get_albums(user)
 
 
-async def run_indexing(job_id: int, folder_path: str | None = None,
-                       album_keys: list[str] | None = None):
+async def run_indexing(job_id: int, folder_path=None, album_keys=None):
     global _stop_requested
     token, secret, user = _get_tokens()
     if not token:
@@ -107,6 +123,9 @@ async def run_indexing(job_id: int, folder_path: str | None = None,
     client = SmugMugClient(
         os.environ["SMUGMUG_API_KEY"], os.environ["SMUGMUG_API_SECRET"], token, secret
     )
+
+    loop = asyncio.get_event_loop()
+    executor = get_executor()
 
     try:
         albums = _resolve_albums(client, user, folder_path, album_keys)
@@ -118,7 +137,6 @@ async def run_indexing(job_id: int, folder_path: str | None = None,
 
         _update_job(job_id, status="running", total_images=len(all_images))
 
-        # Load already-indexed keys once
         with get_conn() as conn:
             already_indexed = set(
                 r[0] for r in conn.execute(
@@ -126,12 +144,12 @@ async def run_indexing(job_id: int, folder_path: str | None = None,
                 ).fetchall()
             )
 
-        # Semaphore limits concurrent downloads
         sem = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
         processed = 0
 
         async def process_one(http: httpx.AsyncClient, img: dict, album_key: str):
             nonlocal processed
+
             image_key = img.get("ImageKey", "")
             image_url = _sized_url(img)
             thumb_url = img.get("ThumbnailUrl", "")
@@ -141,11 +159,19 @@ async def run_indexing(job_id: int, folder_path: str | None = None,
                 _update_job(job_id, indexed_count=processed)
                 return
 
+            # Skip non-image files (videos, raw, etc.)
+            if not is_processable_url(image_url):
+                already_indexed.add(image_key)
+                processed += 1
+                _update_job(job_id, indexed_count=processed)
+                return
+
             async with sem:
                 try:
                     resp = await http.get(image_url, timeout=30)
                     resp.raise_for_status()
-                    faces = await asyncio.to_thread(extract_faces, resp.content)
+                    # Offload CPU-bound detection to a worker process (true parallelism)
+                    faces = await loop.run_in_executor(executor, extract_faces, resp.content)
                     _store_faces_batch(image_key, album_key, image_url, thumb_url, faces)
                     already_indexed.add(image_key)
                 except Exception as e:
@@ -157,14 +183,8 @@ async def run_indexing(job_id: int, folder_path: str | None = None,
         async with httpx.AsyncClient() as http:
             tasks = []
             for img, album_key in all_images:
-                # Check stop flag before queuing each batch
                 if _stop_requested == job_id:
-                    _stop_requested = None
-                    _update_job(job_id, status="stopped")
-                    # Cancel pending tasks
-                    for t in tasks:
-                        t.cancel()
-                    return
+                    break
                 tasks.append(asyncio.create_task(process_one(http, img, album_key)))
 
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -179,8 +199,7 @@ async def run_indexing(job_id: int, folder_path: str | None = None,
         _update_job(job_id, status="failed", error=str(e))
 
 
-def start_indexing_job(folder_path: str | None = None,
-                       album_keys: list[str] | None = None) -> int:
+def start_indexing_job(folder_path=None, album_keys=None) -> int:
     job_id = _create_job()
     asyncio.create_task(run_indexing(job_id, folder_path=folder_path, album_keys=album_keys))
     return job_id

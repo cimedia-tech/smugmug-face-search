@@ -14,6 +14,12 @@ from routes.people import router as people_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Mark any stale "running" jobs as interrupted (they died with the previous process)
+    from db import get_conn
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE indexing_jobs SET status='interrupted' WHERE status='running'"
+        )
     preload_models()
     yield
 
