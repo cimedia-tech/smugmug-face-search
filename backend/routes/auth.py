@@ -6,32 +6,37 @@ from db import get_conn
 
 router = APIRouter(prefix="/auth")
 
-API_KEY = os.environ.get("SMUGMUG_API_KEY", "")
-API_SECRET = os.environ.get("SMUGMUG_API_SECRET", "")
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-CALLBACK_URL = os.environ.get("CALLBACK_URL", "http://localhost:8000/auth/callback")
+def _cfg():
+    return {
+        "key": os.environ.get("SMUGMUG_API_KEY", ""),
+        "secret": os.environ.get("SMUGMUG_API_SECRET", ""),
+        "frontend": os.environ.get("FRONTEND_URL", "http://localhost:3000"),
+        "callback": os.environ.get("CALLBACK_URL", "http://localhost:8001/auth/callback"),
+    }
 
 # Temp store for request tokens (in-process, fine for single-user)
 _pending: dict[str, str] = {}
 
 @router.get("/start")
 def auth_start():
-    if not API_KEY:
+    cfg = _cfg()
+    if not cfg["key"]:
         raise HTTPException(500, "SMUGMUG_API_KEY not configured")
-    token, secret = get_request_token(API_KEY, API_SECRET, CALLBACK_URL)
+    token, secret = get_request_token(cfg["key"], cfg["secret"], cfg["callback"])
     _pending[token] = secret
-    url = get_authorize_url(API_KEY, token)
+    url = get_authorize_url(cfg["key"], token)
     return RedirectResponse(url)
 
 @router.get("/callback")
 def auth_callback(oauth_token: str, oauth_verifier: str):
+    cfg = _cfg()
     secret = _pending.pop(oauth_token, None)
     if not secret:
         raise HTTPException(400, "Unknown oauth_token")
     access_token, access_secret = get_access_token(
-        API_KEY, API_SECRET, oauth_token, secret, oauth_verifier
+        cfg["key"], cfg["secret"], oauth_token, secret, oauth_verifier
     )
-    client = SmugMugClient(API_KEY, API_SECRET, access_token, access_secret)
+    client = SmugMugClient(cfg["key"], cfg["secret"], access_token, access_secret)
     user = client.get_user()
     nick = user.get("NickName", "")
 
@@ -46,7 +51,7 @@ def auth_callback(oauth_token: str, oauth_verifier: str):
                 saved_at=CURRENT_TIMESTAMP
         """, (access_token, access_secret, nick))
 
-    return RedirectResponse(f"{FRONTEND_URL}/?connected=true")
+    return RedirectResponse(f"{cfg['frontend']}/?connected=true")
 
 @router.get("/status")
 def auth_status():

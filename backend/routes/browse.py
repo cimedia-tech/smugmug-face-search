@@ -9,16 +9,12 @@ from services.smugmug import SmugMugClient
 
 router = APIRouter(prefix="/browse")
 
-API_KEY = os.environ.get("SMUGMUG_API_KEY", "")
-API_SECRET = os.environ.get("SMUGMUG_API_SECRET", "")
-
-
 def _client():
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM oauth_tokens WHERE id=1").fetchone()
     if not row:
         raise HTTPException(401, "Not connected to SmugMug")
-    return SmugMugClient(API_KEY, API_SECRET, row["access_token"], row["access_token_secret"]), row["smugmug_user"]
+    return SmugMugClient(os.environ["SMUGMUG_API_KEY"], os.environ["SMUGMUG_API_SECRET"], row["access_token"], row["access_token_secret"]), row["smugmug_user"]
 
 
 @router.get("/folders")

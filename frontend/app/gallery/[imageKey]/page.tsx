@@ -10,23 +10,20 @@ interface Face {
   crop_b64: string | null
 }
 
-export default function GalleryPhoto({ params }: { params: { imageKey: string } }) {
+export default function GalleryPhoto({ params }: { params: Promise<{ imageKey: string }> }) {
   const [faces, setFaces] = useState<Face[]>([])
   const [imageUrl, setImageUrl] = useState('')
-
-  const key = params.imageKey
+  const [key, setKey] = useState('')
 
   useEffect(() => {
-    fetch(`/api/people/photo/${key}/faces`).then(r => r.json()).then(data => {
-      setFaces(data)
-    })
-    // Get image URL from face data or fallback
-    fetch(`/api/people/photo/${key}/faces`).then(r => r.json()).then((data: any[]) => {
-      // image_url is not in faces endpoint — get from a people photo list is complex,
-      // so we store it in session/localStorage when navigating from PhotoGrid
-      const stored = sessionStorage.getItem(`img_${key}`)
-      if (stored) setImageUrl(stored)
-    })
+    params.then(p => setKey(p.imageKey))
+  }, [params])
+
+  useEffect(() => {
+    if (!key) return
+    fetch(`/api/people/photo/${key}/faces`).then(r => r.json()).then(setFaces)
+    const stored = sessionStorage.getItem(`img_${key}`)
+    if (stored) setImageUrl(stored)
   }, [key])
 
   return (

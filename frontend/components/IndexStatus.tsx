@@ -139,6 +139,11 @@ export default function IndexStatus() {
     poll()
   }
 
+  const stopIndex = async () => {
+    await fetch('/api/index/stop', { method: 'POST' })
+    poll()
+  }
+
   const startCluster = async () => {
     setClustering(true)
     await fetch('/api/index/cluster', { method: 'POST' })
@@ -187,13 +192,21 @@ export default function IndexStatus() {
       {status.error && <p className="text-red-400 text-xs">{status.error}</p>}
 
       <div className="flex gap-2">
-        <button
-          onClick={startIndex}
-          disabled={status.status === 'running'}
-          className="flex-1 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 px-3 py-2 rounded text-sm"
-        >
-          {status.status === 'running' ? 'Indexing...' : 'Start Indexing'}
-        </button>
+        {status.status === 'running' ? (
+          <button
+            onClick={stopIndex}
+            className="flex-1 bg-red-700 hover:bg-red-600 px-3 py-2 rounded text-sm"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={startIndex}
+            className="flex-1 bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded text-sm"
+          >
+            Start Indexing
+          </button>
+        )}
         <button
           onClick={startCluster}
           disabled={clustering || status.indexed === 0}

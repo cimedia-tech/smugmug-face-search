@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services.indexer import start_indexing_job, get_active_job
+from services.indexer import start_indexing_job, get_active_job, request_stop
 from services.clusterer import run_clustering
 from typing import Optional
 import asyncio
@@ -36,6 +36,14 @@ def index_status():
         "last_image_key": job["last_image_key"],
         "error": job["error"],
     }
+
+@router.post("/stop")
+def stop_index():
+    job = get_active_job()
+    if not job or job["status"] != "running":
+        raise HTTPException(409, "No running job to stop")
+    request_stop(job["id"])
+    return {"ok": True, "message": "Stop requested — will halt after current image"}
 
 @router.post("/cluster")
 async def cluster():

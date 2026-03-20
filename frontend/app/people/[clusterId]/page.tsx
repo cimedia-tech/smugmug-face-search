@@ -4,13 +4,18 @@ import PhotoGrid from '@/components/PhotoGrid'
 
 interface Photo { smugmug_image_key: string; thumbnail_url: string; image_url: string }
 
-export default function PersonDetail({ params }: { params: { clusterId: string } }) {
+export default function PersonDetail({ params }: { params: Promise<{ clusterId: string }> }) {
   const [name, setName] = useState('')
   const [editing, setEditing] = useState(false)
   const [photos, setPhotos] = useState<Photo[]>([])
-  const id = params.clusterId
+  const [id, setId] = useState('')
 
   useEffect(() => {
+    params.then(p => setId(p.clusterId))
+  }, [params])
+
+  useEffect(() => {
+    if (!id) return
     fetch(`/api/people/${id}/photos`).then(r => r.json()).then(setPhotos)
     fetch('/api/people').then(r => r.json()).then((people: any[]) => {
       const p = people.find(x => String(x.id) === id)
