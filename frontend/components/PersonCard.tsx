@@ -4,16 +4,16 @@ interface Person {
   id: number
   name: string
   photo_count: number
-  sample_face_b64: string | null
+  sample_face_url: string | null
 }
 
 export default function PersonCard({ person }: { person: Person }) {
   return (
     <Link href={`/people/${person.id}`} className="group flex flex-col items-center gap-2">
       <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-800 flex items-center justify-center">
-        {person.sample_face_b64 ? (
+        {person.sample_face_url ? (
           <img
-            src={`data:image/jpeg;base64,${person.sample_face_b64}`}
+            src={person.sample_face_url}
             alt={person.name}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
           />

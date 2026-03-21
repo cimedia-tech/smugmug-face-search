@@ -146,8 +146,11 @@ export default function IndexStatus() {
 
   const startCluster = async () => {
     setClustering(true)
-    await fetch('/api/index/cluster', { method: 'POST' })
+    const r = await fetch('/api/index/cluster', { method: 'POST' })
     setClustering(false)
+    if (r.status === 202) {
+      alert('Clustering runs locally.\n\nRun this in your terminal:\n  python cli/cluster.py')
+    }
   }
 
   if (!status) return null

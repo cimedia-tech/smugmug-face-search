@@ -6,7 +6,7 @@ interface Person {
   id: number
   name: string
   photo_count: number
-  sample_face_b64: string | null
+  sample_face_url: string | null
 }
 
 export default function PeoplePage() {

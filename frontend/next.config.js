@@ -1,15 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${process.env.BACKEND_URL || 'http://localhost:8000'}/:path*`,
-      },
-    ]
-  },
   images: {
-    remotePatterns: [{ protocol: 'https', hostname: '**.smugmug.com' }],
+    remotePatterns: [
+      { protocol: 'https', hostname: '**.smugmug.com' },
+      { protocol: 'https', hostname: '**.supabase.co' },
+    ],
   },
 }
 module.exports = nextConfig
