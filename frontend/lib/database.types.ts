@@ -148,6 +148,33 @@ export type Database = {
           }
         ]
       }
+      search_jobs: {
+        Row: {
+          id:         number
+          status:     string
+          image_url:  string
+          top_k:      number
+          results:    Json | null
+          error:      string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          image_url:  string
+          status?:    string
+          top_k?:     number
+          results?:   Json | null
+          error?:     string | null
+        }
+        Update: {
+          status?:     string
+          top_k?:      number
+          results?:    Json | null
+          error?:      string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       person_clusters_with_counts: {

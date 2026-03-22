@@ -23,7 +23,10 @@ export default function PeoplePage() {
     <main className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">People</h1>
-        <a href="/" className="text-gray-400 hover:text-white text-sm">← Home</a>
+        <div className="flex gap-4">
+          <a href="/search" className="text-blue-400 hover:text-blue-300 text-sm">Search by Face</a>
+          <a href="/" className="text-gray-400 hover:text-white text-sm">← Home</a>
+        </div>
       </div>
       {loading ? (
         <p className="text-gray-500">Loading...</p>

@@ -32,12 +32,20 @@ export default function Home() {
         <div className="space-y-6">
           <p className="text-green-400">Connected as <strong>{auth.user}</strong></p>
           <IndexStatus />
-          <a
-            href="/people"
-            className="inline-block bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-lg font-medium"
-          >
-            Browse People →
-          </a>
+          <div className="flex gap-3">
+            <a
+              href="/people"
+              className="inline-block bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-lg font-medium"
+            >
+              Browse People →
+            </a>
+            <a
+              href="/search"
+              className="inline-block bg-blue-700 hover:bg-blue-600 px-6 py-3 rounded-lg font-medium"
+            >
+              Search by Face →
+            </a>
+          </div>
         </div>
       )}
     </main>
