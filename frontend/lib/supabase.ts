@@ -1,6 +1,5 @@
 import { createBrowserClient, createServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import type { Database } from './database.types'
 
 const supabaseUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -13,6 +12,7 @@ export function createClient() {
 
 // Server client — use in Server Components, Route Handlers, Middleware
 export async function createServerSupabaseClient() {
+  const { cookies } = await import('next/headers')
   const cookieStore = await cookies()
   return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
     cookies: {
