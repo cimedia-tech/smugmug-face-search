@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createClient } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 interface SearchResult {
   image_key:    string
@@ -61,7 +61,7 @@ export default function SearchPage() {
 
     try {
       // Upload directly to Supabase Storage from the browser
-      const sb       = createClient()
+            const sb        = supabase
       const filename = `search/${Date.now()}_${file.name.replace(/[^a-z0-9.]/gi, '_')}`
       const { error: upErr } = await sb.storage.from('faces').upload(filename, file, {
         contentType: file.type,
