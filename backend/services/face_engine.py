@@ -6,8 +6,10 @@ from PIL import Image
 _models_loaded = False
 
 DETECTOR = os.environ.get("FACE_DETECTOR", "yunet")
-MAX_DIM = int(os.environ.get("FACE_MAX_DIM", "960"))   # reduced from 1280
-MIN_FACE_PX = int(os.environ.get("FACE_MIN_PX", "30")) # skip tiny faces
+MAX_DIM = int(os.environ.get("FACE_MAX_DIM", "960"))
+MIN_FACE_PX = int(os.environ.get("FACE_MIN_PX", "20"))  # lowered to catch smaller faces
+# Fallback detectors tried in order if primary fails
+FALLBACK_DETECTORS = ["yunet", "opencv", "ssd", "mtcnn"]
 
 # Image extensions worth processing
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff"}
@@ -57,14 +59,23 @@ def extract_faces(img_bytes: bytes) -> list[dict]:
 
     h, w = img_array.shape[:2]
 
-    try:
-        results = DeepFace.represent(
-            img_array,
-            model_name="Facenet512",
-            enforce_detection=True,
-            detector_backend=DETECTOR,
-        )
-    except ValueError:
+    # Try primary detector first, then fallbacks — helps with AI-generated images
+    results = None
+    detectors_to_try = [DETECTOR] + [d for d in FALLBACK_DETECTORS if d != DETECTOR]
+    for detector in detectors_to_try:
+        try:
+            results = DeepFace.represent(
+                img_array,
+                model_name="Facenet512",
+                enforce_detection=False,  # don't hard-fail; filter by bbox size below
+                detector_backend=detector,
+            )
+            if results:
+                print(f"  Face detected with '{detector}' detector")
+                break
+        except Exception:
+            continue
+    if not results:
         return []
 
     faces = []
@@ -88,7 +99,11 @@ def extract_faces(img_bytes: bytes) -> list[dict]:
         buf = io.BytesIO()
         pil_crop.save(buf, format="JPEG", quality=80)
 
-        faces.append({"embedding": emb, "bbox": bbox, "crop_bytes": buf.getvalue()})
+        faces.append({
+            "embedding": emb.tolist(),  # convert numpy → plain list for JSON/Supabase
+            "bbox": bbox,
+            "crop_bytes": buf.getvalue()
+        })
 
     return faces
 
