@@ -51,6 +51,7 @@ type Selection =
 export default function IndexStatus() {
   const [status, setStatus]         = useState<Status | null>(null)
   const [clustering, setClustering] = useState(false)
+  const [starting, setStarting]     = useState(false)
   const [picking, setPicking]       = useState(false)
   const [browse, setBrowse]         = useState<BrowseResult | null>(null)
   const [browseStack, setBrowseStack] = useState<string[]>([])
@@ -64,14 +65,13 @@ export default function IndexStatus() {
     }
   }, [])
 
-  const poll = () => {
-    fetch('/api/index/status').then(r => r.json()).then((s: Status) => {
-      const prev = prevStatusRef.current
-      if (prev === 'running' && s.status === 'done')   notifyDone(true)
-      if (prev === 'running' && s.status === 'failed') notifyDone(false)
-      prevStatusRef.current = s.status
-      setStatus(s)
-    })
+  const poll = async () => {
+    const s: Status = await fetch('/api/index/status').then(r => r.json())
+    const prev = prevStatusRef.current
+    if (prev === 'running' && s.status === 'done')   notifyDone(true)
+    if (prev === 'running' && s.status === 'failed') notifyDone(false)
+    prevStatusRef.current = s.status
+    setStatus(s)
   }
 
   useEffect(() => {
@@ -127,6 +127,7 @@ export default function IndexStatus() {
   }
 
   const startIndex = async () => {
+    setStarting(true)
     const body =
       selection.type === 'folder'  ? { folder_path: selection.path } :
       selection.type === 'albums'  ? { album_keys: selection.keys } :
@@ -136,7 +137,8 @@ export default function IndexStatus() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    poll()
+    await poll()
+    setStarting(false)
   }
 
   const stopIndex = async () => {
@@ -194,6 +196,14 @@ export default function IndexStatus() {
 
       {status.error && <p className="text-red-400 text-xs">{status.error}</p>}
 
+      {/* Pending reminder */}
+      {status.status === 'pending' && (
+        <div className="bg-yellow-900/40 border border-yellow-700/50 rounded-lg px-3 py-2">
+          <p className="text-yellow-300 text-xs font-medium">⏳ Job queued — start the CLI to begin:</p>
+          <code className="text-yellow-200 text-xs mt-1 block">python cli/index.py</code>
+        </div>
+      )}
+
       <div className="flex gap-2">
         {status.status === 'running' ? (
           <button
@@ -205,9 +215,15 @@ export default function IndexStatus() {
         ) : (
           <button
             onClick={startIndex}
-            className="flex-1 bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded text-sm"
+            disabled={starting}
+            className="flex-1 bg-blue-700 hover:bg-blue-600 disabled:opacity-60 px-3 py-2 rounded text-sm flex items-center justify-center gap-2"
           >
-            Start Indexing
+            {starting ? (
+              <>
+                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Starting...
+              </>
+            ) : 'Start Indexing'}
           </button>
         )}
         <button
